@@ -1,0 +1,52 @@
+// Copyright 2026 Digital Clever Solution LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package txlog
+
+import (
+	"testing"
+)
+
+var (
+	exitEpoch               = uint64(100)
+	exitLogWithExitEpoch    = []byte{151, 40, 188, 115, 60, 143, 206, 221, 224, 195, 163, 61, 172, 18, 218, 62, 187, 170, 14, 183, 77, 129, 58, 52, 182, 0, 82, 14, 121, 118, 162, 96, 216, 95, 5, 118, 135, 232, 201, 35, 213, 44, 120, 113, 85, 21, 52, 141, 167, 229, 88, 204, 110, 250, 28, 65, 39, 14, 244, 170, 34, 123, 61, 214, 180, 163, 149, 30, 123, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0}
+	exitLogWithOutExitEpoch = []byte{151, 40, 188, 115, 60, 143, 206, 221, 224, 195, 163, 61, 172, 18, 218, 62, 187, 170, 14, 183, 77, 129, 58, 52, 182, 0, 82, 14, 121, 118, 162, 96, 216, 95, 5, 118, 135, 232, 201, 35, 213, 44, 120, 113, 85, 21, 52, 141, 167, 229, 88, 204, 110, 250, 28, 65, 39, 14, 244, 170, 34, 123, 61, 214, 180, 163, 149, 30, 123, 0, 0, 0, 0, 0, 0, 0}
+)
+
+func TestPackExitRequestLogData(t *testing.T) {
+	// Have exit epoch
+	data := PackExitRequestLogData(testPubkey, testCreatorAddress, testIndex, &exitEpoch)
+	assertEqual(t, exitLogWithExitEpoch, data)
+	// Exit epoch is nil
+	data = PackExitRequestLogData(testPubkey, testCreatorAddress, testIndex, nil)
+	assertEqual(t, exitLogWithOutExitEpoch, data)
+}
+
+func TestUnpackExitRequestLogData(t *testing.T) {
+	// Have exit epoch
+	pKey, creator, valIndex, exitAfter, err := UnpackExitRequestLogData(exitLogWithExitEpoch)
+	assertEqual(t, testPubkey, pKey)
+	assertEqual(t, testCreatorAddress, creator)
+	assertEqual(t, testIndex, valIndex)
+	assertEqual(t, exitEpoch, *exitAfter)
+	assertNoError(t, err)
+
+	// Exit epoch is nil
+	pKey, creator, valIndex, exitAfter, err = UnpackExitRequestLogData(exitLogWithOutExitEpoch)
+	assertEqual(t, testPubkey, pKey)
+	assertEqual(t, testCreatorAddress, creator)
+	assertEqual(t, testIndex, valIndex)
+	assertNil(t, exitAfter)
+	assertNoError(t, err)
+}

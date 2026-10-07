@@ -1,0 +1,36 @@
+run:
+  timeout: 5m
+  tests: false
+  skip-files:
+    - token/operation/test_utils.go
+    - validator/operation/test_utils.go
+    - validator/txlog/test_utils.go
+
+linters:
+  disable-all: true
+  enable:
+    - goconst
+    - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - unconvert
+    - typecheck
+    - unused
+    - staticcheck
+    - durationcheck
+    - exportloopref
+    - whitespace
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goconst:
+    min-len: 3
+    min-occurrences: 6
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,12 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Build artifacts
+/build/
+/bin/
+
+# Go
+*.test
+*.out

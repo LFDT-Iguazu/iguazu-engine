@@ -3,9 +3,6 @@ image: golang:1.21
 before_script:
   - echo "machine $CI_SERVER_HOST login gitlab-ci-token password $CI_JOB_TOKEN" >> ~/.netrc
   - export GOPRIVATE=${CI_SERVER_HOST}
-  # iguazu-types resolves via the local replace in go.mod until it is published
-  # at github.com/LFDT-Iguazu; clone it next to this repo.
-  - rm -rf ../iguazu-types && git clone --depth 1 "https://${CI_SERVER_HOST}/waterfall/protocol/iguazu/iguazu-types.git" ../iguazu-types
   - source ~/.gvm/scripts/gvm || echo "Failed to source GVM"
   - gvm use go1.21.12 --default || echo "Failed to use GVM"
   - go version
@@ -30,7 +27,6 @@ lint:
   before_script:
     - echo "machine $CI_SERVER_HOST login gitlab-ci-token password $CI_JOB_TOKEN" >> ~/.netrc
     - export GOPRIVATE=${CI_SERVER_HOST}
-    - rm -rf ../iguazu-types && git clone --depth 1 "https://${CI_SERVER_HOST}/waterfall/protocol/iguazu/iguazu-types.git" ../iguazu-types
   after_script:
     - echo "after_script"
 

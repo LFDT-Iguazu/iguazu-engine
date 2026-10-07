@@ -3,12 +3,12 @@ module github.com/LFDT-Iguazu/iguazu-engine
 go 1.21
 
 require (
+	github.com/LFDT-Iguazu/iguazu-types v0.1.0
 	github.com/holiman/uint256 v1.2.4
 	github.com/minio/sha256-simd v1.0.0
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/stretchr/testify v1.11.1
 	github.com/waterfall-network/fastssz v0.1.4
-	github.com/LFDT-Iguazu/iguazu-types v0.1.0
 )
 
 require (
@@ -24,6 +24,3 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// Local checkout until iguazu-types is published at github.com/LFDT-Iguazu.
-replace github.com/LFDT-Iguazu/iguazu-types => ../iguazu-types

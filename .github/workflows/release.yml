@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Publishes a GitHub Release for every pushed version tag (vX.Y.Z).
+#
+# The release carries a source archive and its SHA256SUMS, with SLSA build
+# provenance signed through Sigstore (GitHub artifact attestations). See
+# RELEASE.md for how to verify them. With immutable releases enabled in the
+# repository settings, a published release and its tag cannot be changed.
+#
+# Use "Run workflow" to publish a release for an already existing tag.
+
+name: Release
+on:
+  push:
+    tags: [ "v*.*.*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.2.0)"
+        required: true
+
+permissions: read-all
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to create the release.
+      contents: write
+      # Needed to sign the provenance with Sigstore and store the attestation.
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: "Build source archive and checksums"
+        run: |
+          name="${GITHUB_REPOSITORY#*/}-${TAG#v}"
+          mkdir dist
+          git archive --format=tar.gz --prefix="$name/" -o "dist/$name.tar.gz" HEAD
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: "Attest build provenance"
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/*"
+
+      - name: "Create release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes

@@ -60,3 +60,12 @@ author. Pull Requests with unsigned commits cannot be merged.
 Source files are licensed under the [Apache License 2.0](LICENSE). New files
 should start with the license header and include
 `SPDX-License-Identifier: Apache-2.0`.
+
+## Governance
+
+Iguazu is governed by its Technical Steering Committee (TSC) under the
+[Iguazu Technical Charter](https://github.com/LFDT-Iguazu/governance). The TSC voting
+members are the maintainers listed in the governance repository's
+[MAINTAINERS.md](https://github.com/LFDT-Iguazu/governance/blob/main/MAINTAINERS.md),
+which also describes how to become a maintainer. Project-wide governance documents and
+community call agendas are kept in the [governance repository](https://github.com/LFDT-Iguazu/governance).

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LFDT-Iguazu/governance/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately as described in the security policy.
+  - name: Questions and discussion
+    url: https://discord.lfdecentralizedtrust.org/
+    about: Ask in the #iguazu-general channel on the LF Decentralized Trust Discord.

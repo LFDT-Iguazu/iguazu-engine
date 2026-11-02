@@ -19,6 +19,7 @@ Release notes for every version are published with its
 
 ### Added
 
+- GitHub Actions: CodeQL static analysis (security and quality queries).
 - GitHub Actions: CI (build, vet, test), OpenSSF Scorecard and signed releases with SLSA provenance (see [RELEASE.md](RELEASE.md)); Dependabot.
 - Repository files required by LF Decentralized Trust: `RELEASE.md`, `NOTICE`, `ADOPTERS.md`, issue and pull request templates.
 

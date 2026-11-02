@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# CodeQL static analysis (security and quality queries). Results are shown in
+# the Security tab of the repository.
+# Actions are pinned by commit SHA; Dependabot keeps the pins up to date.
+
+name: CodeQL
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyze Go
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to upload the results to the Security tab.
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: "Set up Go"
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: "Initialize CodeQL"
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: go
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: "Build"
+        run: go build ./...
+
+      - name: "Perform CodeQL analysis"
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:go"

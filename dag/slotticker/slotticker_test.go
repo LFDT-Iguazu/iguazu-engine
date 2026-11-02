@@ -1,4 +1,5 @@
 // Copyright 2026 Digital Clever Solution LLC
+// SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,132 +20,93 @@ import (
 	"time"
 )
 
-var _ Ticker = (*SlotTicker)(nil)
-
-func TestSlotTicker(t *testing.T) {
-	ticker := &SlotTicker{
-		c:    make(chan uint64),
-		done: make(chan struct{}),
+func TestFirstTick(t *testing.T) {
+	genesis := time.Unix(1_700_000_000, 0)
+	const d = 6 * time.Second
+	cases := []struct {
+		name     string
+		now      time.Time
+		wantSlot uint64
+		wantAt   time.Time
+	}{
+		{"before genesis", genesis.Add(-time.Hour), 0, genesis},
+		{"at genesis", genesis, 0, genesis},
+		{"inside slot 0", genesis.Add(5 * time.Second), 0, genesis},
+		{"start of slot 1", genesis.Add(d), 2, genesis.Add(2 * d)},
+		{"inside slot 1", genesis.Add(d + time.Second), 2, genesis.Add(2 * d)},
+		{"inside slot 41", genesis.Add(41*d + 3*time.Second), 42, genesis.Add(42 * d)},
 	}
-	defer ticker.Done()
-
-	var sinceDuration time.Duration
-	since := func(time.Time) time.Duration {
-		return sinceDuration
-	}
-
-	var untilDuration time.Duration
-	until := func(time.Time) time.Duration {
-		return untilDuration
-	}
-
-	var tick chan time.Time
-	after := func(time.Duration) <-chan time.Time {
-		return tick
-	}
-
-	genesisTime := time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
-	secondsPerSlot := uint64(8)
-
-	// Test when the ticker starts immediately after genesis time.
-	sinceDuration = 1 * time.Second
-	untilDuration = 7 * time.Second
-	// Make this a buffered channel to prevent a deadlock since
-	// the other goroutine calls a function in this goroutine.
-	tick = make(chan time.Time, 2)
-	ticker.start(genesisTime, secondsPerSlot, since, until, after)
-
-	// Tick once.
-	tick <- time.Now()
-	slot := <-ticker.C()
-	if slot != 0 {
-		t.Fatalf("Expected %d, got %d", 0, slot)
-	}
-
-	// Tick twice.
-	tick <- time.Now()
-	slot = <-ticker.C()
-	if slot != 1 {
-		t.Fatalf("Expected %d, got %d", 1, slot)
-	}
-
-	// Tick thrice.
-	tick <- time.Now()
-	slot = <-ticker.C()
-	if slot != 2 {
-		t.Fatalf("Expected %d, got %d", 2, slot)
-	}
-}
-
-func TestSlotTickerGenesis(t *testing.T) {
-	ticker := &SlotTicker{
-		c:    make(chan uint64),
-		done: make(chan struct{}),
-	}
-	defer ticker.Done()
-
-	var sinceDuration time.Duration
-	since := func(time.Time) time.Duration {
-		return sinceDuration
-	}
-
-	var untilDuration time.Duration
-	until := func(time.Time) time.Duration {
-		return untilDuration
-	}
-
-	var tick chan time.Time
-	after := func(time.Duration) <-chan time.Time {
-		return tick
-	}
-
-	genesisTime := time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
-	secondsPerSlot := uint64(8)
-
-	// Test when the ticker starts before genesis time.
-	sinceDuration = -1 * time.Second
-	untilDuration = 1 * time.Second
-	// Make this a buffered channel to prevent a deadlock since
-	// the other goroutine calls a function in this goroutine.
-	tick = make(chan time.Time, 2)
-	ticker.start(genesisTime, secondsPerSlot, since, until, after)
-
-	// Tick once.
-	tick <- time.Now()
-	slot := <-ticker.C()
-	if slot != 0 {
-		t.Fatalf("Expected %d, got %d", 0, slot)
-	}
-
-	// Tick twice.
-	tick <- time.Now()
-	slot = <-ticker.C()
-	if slot != 1 {
-		t.Fatalf("Expected %d, got %d", 1, slot)
-	}
-}
-
-func TestGetSlotTickerWithOffset_OK(t *testing.T) {
-	genesisTime := time.Now()
-	secondsPerSlot := uint64(4)
-	offset := time.Duration(secondsPerSlot/2) * time.Second
-
-	offsetTicker := NewSlotTickerWithOffset(genesisTime, offset, secondsPerSlot)
-	normalTicker := NewSlotTicker(genesisTime, secondsPerSlot)
-
-	firstTicked := 0
-	for {
-		select {
-		case <-offsetTicker.C():
-			if firstTicked != 1 {
-				t.Fatal("Expected other ticker to tick first")
-			}
-			return
-		case <-normalTicker.C():
-			if firstTicked != 0 {
-				t.Fatal("Expected normal ticker to tick first")
-			}
-			firstTicked = 1
+	for _, c := range cases {
+		slot, at := firstTick(genesis, c.now, d)
+		if slot != c.wantSlot || !at.Equal(c.wantAt) {
+			t.Errorf("%s: got slot %d at %v, want slot %d at %v", c.name, slot, at, c.wantSlot, c.wantAt)
 		}
+	}
+}
+
+// fakeClock fires every timer immediately and advances time to its deadline.
+type fakeClock struct {
+	now   time.Time
+	waits chan time.Duration
+}
+
+func (f *fakeClock) clock() clock {
+	return clock{
+		now: func() time.Time { return f.now },
+		after: func(d time.Duration) <-chan time.Time {
+			f.waits <- d
+			f.now = f.now.Add(d)
+			c := make(chan time.Time, 1)
+			c <- f.now
+			return c
+		},
+	}
+}
+
+func TestTicks(t *testing.T) {
+	genesis := time.Unix(1_700_000_000, 0)
+	const d = 5 * time.Second
+	f := &fakeClock{now: genesis.Add(12 * time.Second), waits: make(chan time.Duration, 16)}
+	ticker := &SlotTicker{c: make(chan uint64), done: make(chan struct{})}
+	go ticker.run(genesis, d, f.clock())
+
+	// Slot 3 starts 3s from now, then a tick every slot.
+	for i, want := range []uint64{3, 4, 5} {
+		if got := <-ticker.C(); got != want {
+			t.Fatalf("tick %d = slot %d, want %d", i, got, want)
+		}
+	}
+	if first := <-f.waits; first != 3*time.Second {
+		t.Errorf("first wait = %v, want 3s", first)
+	}
+	if next := <-f.waits; next != d {
+		t.Errorf("next wait = %v, want %v", next, d)
+	}
+
+	ticker.Done()
+	ticker.Done() // must not block or panic
+	select {
+	case slot, ok := <-ticker.C():
+		if ok {
+			// a tick that was already pending may still be delivered once
+			t.Logf("pending tick %d delivered after Done", slot)
+		}
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestNewSlotTickerPanics(t *testing.T) {
+	for name, f := range map[string]func(){
+		"zero genesis":  func() { NewSlotTicker(time.Time{}, 6) },
+		"zero duration": func() { NewSlotTicker(time.Now(), 0) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s: expected a panic", name)
+				}
+			}()
+			f()
+		}()
 	}
 }

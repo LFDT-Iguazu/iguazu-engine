@@ -1,4 +1,5 @@
 // Copyright 2026 Digital Clever Solution LLC
+// SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,8 +167,6 @@ func TestCreateOperationOperation(t *testing.T) {
 		default:
 			return ErrStandardNotValid
 		}
-
-		return nil
 	}
 
 	operationDecode := func(b []byte, i interface{}) error {

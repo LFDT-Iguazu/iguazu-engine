@@ -1,4 +1,5 @@
 // Copyright 2026 Digital Clever Solution LLC
+// SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package shuffle computes the pseudorandom permutation of validators used to
+// assign block creators to slots.
+//
+// The permutation is the "swap-or-not" shuffle of the Ethereum consensus
+// specification (compute_shuffled_index), applied to a whole list at once:
+// every round picks a pivot and, for each pair of positions (i, (pivot-i) mod
+// n), swaps them when the bit selected by the larger position is set. Hashes
+// are SHA-256.
 package shuffle
 
 import (
@@ -21,117 +30,82 @@ import (
 	"time"
 
 	"github.com/LFDT-Iguazu/iguazu-types/common"
+	"github.com/minio/sha256-simd"
 )
 
-const seedSize = int8(32)
-const roundSize = int8(1)
-const positionWindowSize = int8(4)
-const pivotViewSize = seedSize + roundSize
-const totalSize = seedSize + roundSize + positionWindowSize
-const shuffleRoundCount = uint8(90)
+const (
+	// rounds is the number of swap-or-not rounds (SHUFFLE_ROUND_COUNT).
+	rounds = 90
+	// maxListSize bounds the list length so positions fit the hash input.
+	maxListSize = 1 << 40
+)
 
-var maxShuffleListSize uint64 = 1 << 40
-
-// ShuffleValidators returns list of shuffled addresses in a pseudorandom permutation `p` of `0...list_size - 1` with "seed" as entropy.
+// ShuffleValidators permutes validators in place, using seed as the source of
+// randomness, and returns the same slice. The rounds are applied in reverse
+// order (from the last round to the first).
 func ShuffleValidators(validators []common.Address, seed common.Hash) ([]common.Address, error) {
 	start := time.Now()
 
-	shuffledList, err := unshuffleList(validators, seed)
-	if err != nil {
-		return nil, err
+	if uint64(len(validators)) > maxListSize {
+		return nil, fmt.Errorf("list size %d out of bounds", len(validators))
+	}
+	for round := rounds - 1; round >= 0; round-- {
+		applyRound(validators, seed, byte(round))
 	}
 
 	slog.Info("^^^^^^^^^^^^ TIME", "elapsed", time.Since(start), "func", "ShuffleValidators")
-	return shuffledList, nil
-}
-
-func unshuffleList(validators []common.Address, seed common.Hash) ([]common.Address, error) {
-	return innerShuffleList(validators, seed, false /* un-shuffle */)
-}
-
-func innerShuffleList(validators []common.Address, seed common.Hash, shuffl bool) ([]common.Address, error) {
-	if len(validators) <= 1 {
-		return validators, nil
-	}
-
-	if uint64(len(validators)) > maxShuffleListSize {
-		return nil, fmt.Errorf("list size %d out of bounds", len(validators))
-	}
-
-	rounds := shuffleRoundCount
-	hashfunc := CustomSHA256Hasher()
-	if rounds == 0 {
-		return validators, nil
-	}
-
-	listSize := uint64(len(validators))
-	buf := make([]byte, totalSize)
-	r := uint8(0)
-	if !shuffl {
-		r = rounds - 1
-	}
-
-	copy(buf[:seedSize], seed[:])
-	for {
-		buf[seedSize] = r
-		ph := hashfunc(buf[:pivotViewSize])
-		pivot := FromBytes8(ph[:8]) % listSize
-		mirror := (pivot + 1) >> 1
-		binary.LittleEndian.PutUint32(buf[pivotViewSize:], uint32(pivot>>8))
-		source := hashfunc(buf)
-		byteV := source[(pivot&0xff)>>3]
-		for i, j := uint64(0), pivot; i < mirror; i, j = i+1, j-1 {
-			byteV, source = swapOrNot(buf, byteV, i, j, validators, source, hashfunc)
-		}
-		// Now repeat, but for the part after the pivot.
-		mirror = (pivot + listSize + 1) >> 1
-		end := listSize - 1
-		binary.LittleEndian.PutUint32(buf[pivotViewSize:], uint32(end>>8))
-		source = hashfunc(buf)
-		byteV = source[(end&0xff)>>3]
-		for i, j := pivot+1, end; i < mirror; i, j = i+1, j-1 {
-			byteV, source = swapOrNot(buf, byteV, i, j, validators, source, hashfunc)
-		}
-		if shuffl {
-			r++
-			if r == rounds {
-				break
-			}
-		} else {
-			if r == 0 {
-				break
-			}
-			r--
-		}
-	}
-
 	return validators, nil
 }
 
-// swapOrNot describes the main algorithm behind the shuffle where we swap bytes in the inputted value
-// depending on if the conditions are met.
-func swapOrNot(
-	buf []byte,
-	byteV byte,
-	i, j uint64,
-	validators []common.Address,
-	source common.Hash,
-	hashFunc func([]byte) common.Hash,
-) (byte, common.Hash) {
-	if j&0xff == 0xff {
-		binary.LittleEndian.PutUint32(buf[pivotViewSize:], uint32(j>>8))
-		source = hashFunc(buf)
+// applyRound performs one swap-or-not round on list.
+func applyRound(list []common.Address, seed common.Hash, round byte) {
+	n := uint64(len(list))
+	if n <= 1 {
+		return
 	}
 
-	if j&0x7 == 0x7 {
-		byteV = source[(j&0xff)>>3]
+	// The hash input is seed || round || uint32_le(position / 256).
+	var input [common.HashLength + 1 + 4]byte
+	copy(input[:], seed[:])
+	input[common.HashLength] = round
+
+	pivotDigest := sha256.Sum256(input[:common.HashLength+1])
+	pivot := binary.LittleEndian.Uint64(pivotDigest[:8]) % n
+
+	// Each source hash covers 256 consecutive positions; positions are visited
+	// out of order, so the hashes are cached per block.
+	sources := make(map[uint64][32]byte)
+	bit := func(position uint64) bool {
+		block := position >> 8
+		source, ok := sources[block]
+		if !ok {
+			binary.LittleEndian.PutUint32(input[common.HashLength+1:], uint32(block))
+			source = sha256.Sum256(input[:])
+			sources[block] = source
+		}
+		return source[(position&0xff)>>3]>>(position&7)&1 == 1
 	}
 
-	bitV := (byteV >> (j & 0x7)) & 0x1
-
-	if bitV == 1 {
-		validators[i], validators[j] = validators[j], validators[i]
+	for i := uint64(0); i < n; i++ {
+		flip := (pivot + n - i) % n
+		// Visit each pair once; the bit is chosen by the larger position.
+		if i < flip && bit(flip) {
+			list[i], list[flip] = list[flip], list[i]
+		}
 	}
+}
 
-	return byteV, source
+// Bytes8 returns x as 8 little-endian bytes.
+func Bytes8(x uint64) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, x)
+	return b
+}
+
+// FromBytes8 decodes 8 little-endian bytes. Shorter input yields 0.
+func FromBytes8(b []byte) uint64 {
+	if len(b) < 8 {
+		return 0
+	}
+	return binary.LittleEndian.Uint64(b)
 }

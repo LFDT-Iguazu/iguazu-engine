@@ -8,6 +8,7 @@ Release notes for every version are published with its
 ### Changed
 
 - Reimplemented the `validator/shuffle` (swap-or-not shuffle) and `dag/slotticker` packages. The validator permutation is unchanged. `SlotTicker.Done` may now be called more than once.
+- `slotticker.NewSlotTicker` now takes `*types.SlotInfo` and follows the slot duration fork. `Dag.HandleSyncSlotInfo` accepts the base and the forked slot duration from the coordinator and completes its settings with the local fork settings. With the fork disabled, timing is unchanged.
 
 ### Removed
 

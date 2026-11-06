@@ -501,23 +501,31 @@ func (d *Dag) HandleSyncSlotInfo(slotInfo types.SlotInfo) (bool, error) {
 	slog.Info("Handle Sync Slot info", "params", slotInfo)
 	si := d.bc.GetSlotInfo()
 	if si == nil {
-		err := d.bc.SetSlotInfo(&slotInfo)
+		err := d.bc.SetSlotInfo(d.slotInfoFromCoordinator(&slotInfo))
 		if err != nil {
 			return false, err
 		}
 		return true, nil
-	} else if si.GenesisTime == slotInfo.GenesisTime &&
-		si.SecondsPerSlot == slotInfo.SecondsPerSlot &&
-		si.SlotsPerEpoch == slotInfo.SlotsPerEpoch {
+	} else if si.MatchCoordinatorParams(&slotInfo, si.CurrentSlot()) {
 		return true, nil
 	} else if d.eth.IsDevMode() {
-		err := d.bc.SetSlotInfo(&slotInfo)
+		err := d.bc.SetSlotInfo(d.slotInfoFromCoordinator(&slotInfo))
 		if err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 	return false, nil
+}
+
+// slotInfoFromCoordinator completes the slot settings received from the coordinating
+// network with the local slot duration fork settings: the coordinator is not aware of
+// the fork and never reports them.
+func (d *Dag) slotInfoFromCoordinator(slotInfo *types.SlotInfo) *types.SlotInfo {
+	si := slotInfo.Copy()
+	si.ForkSlotUpSecondsPerSlot = d.bc.Config().ForkSlotUpSecondsPerSlot
+	si.UpSecondsPerSlot = d.bc.Config().UpSecondsPerSlot
+	return si
 }
 
 // HandleValidateFinalization validates the given spine sequence by checking
@@ -600,9 +608,7 @@ func (d *Dag) exitProcedure() {
 }
 
 func (d *Dag) workLoop() {
-	secPerSlot := d.bc.GetSlotInfo().SecondsPerSlot
-	genesisTime := time.Unix(int64(d.bc.GetSlotInfo().GenesisTime), 0)
-	slotTicker := slotticker.NewSlotTicker(genesisTime, secPerSlot)
+	slotTicker := slotticker.NewSlotTicker(d.bc.GetSlotInfo())
 	// clean invalid not processed val sync pool
 	d.bc.CleanInvalidNotProcessedValidatorSync()
 

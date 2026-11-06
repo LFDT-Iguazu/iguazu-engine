@@ -27,3 +27,5 @@ require (
 
 // Superseded by v0.2.0.
 retract v0.1.0
+
+replace github.com/LFDT-Iguazu/iguazu-types => ../wf-types

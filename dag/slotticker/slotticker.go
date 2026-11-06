@@ -17,13 +17,16 @@
 package slotticker
 
 import (
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/LFDT-Iguazu/iguazu-types/blockdag/types"
 )
 
 // SlotTicker delivers the number of each slot on its channel at the moment
-// the slot starts. Slot boundaries are multiples of the slot duration counted
-// from the genesis time.
+// the slot starts. Slot boundaries are taken from the slot info, so the ticker
+// follows the slot duration fork without a restart.
 type SlotTicker struct {
 	c        chan uint64
 	done     chan struct{}
@@ -38,24 +41,23 @@ type clock struct {
 
 var realClock = clock{now: time.Now, after: time.After}
 
-// NewSlotTicker starts a ticker for slots of secondsPerSlot seconds counted
-// from genesisTime.
+// NewSlotTicker starts a ticker for the slots of the given slot info.
 //
 // Before genesis and during slot 0 the first tick is slot 0, delivered at
 // genesis (immediately if genesis has passed). Later, the first tick is the
 // next slot boundary.
-func NewSlotTicker(genesisTime time.Time, secondsPerSlot uint64) *SlotTicker {
-	if genesisTime.IsZero() {
+func NewSlotTicker(si *types.SlotInfo) *SlotTicker {
+	if si == nil || si.GenesisTime == 0 {
 		panic("zero genesis time")
 	}
-	if secondsPerSlot == 0 {
+	if si.SecondsPerSlot == 0 {
 		panic("zero slot duration")
 	}
 	t := &SlotTicker{
 		c:    make(chan uint64),
 		done: make(chan struct{}),
 	}
-	go t.run(genesisTime, time.Duration(secondsPerSlot)*time.Second, realClock)
+	go t.run(si.Copy(), realClock)
 	return t
 }
 
@@ -70,18 +72,18 @@ func (t *SlotTicker) Done() {
 }
 
 // firstTick returns the first slot to deliver and when to deliver it.
-func firstTick(genesis, now time.Time, slotDuration time.Duration) (uint64, time.Time) {
-	elapsed := now.Sub(genesis)
-	if elapsed < slotDuration {
-		return 0, genesis
+func firstTick(si *types.SlotInfo, now time.Time) (uint64, time.Time, error) {
+	current := si.SlotByTimestamp(uint64(now.Unix()))
+	if current == 0 {
+		return 0, time.Unix(int64(si.GenesisTime), 0), nil
 	}
-	slot := uint64(elapsed/slotDuration) + 1
-	return slot, genesis.Add(time.Duration(slot) * slotDuration)
+	at, err := si.StartSlotTime(current + 1)
+	return current + 1, at, err
 }
 
-func (t *SlotTicker) run(genesis time.Time, slotDuration time.Duration, clk clock) {
-	slot, at := firstTick(genesis, clk.now(), slotDuration)
-	for {
+func (t *SlotTicker) run(si *types.SlotInfo, clk clock) {
+	slot, at, err := firstTick(si, clk.now())
+	for err == nil {
 		select {
 		case <-clk.after(at.Sub(clk.now())):
 		case <-t.done:
@@ -93,6 +95,7 @@ func (t *SlotTicker) run(genesis time.Time, slotDuration time.Duration, clk cloc
 			return
 		}
 		slot++
-		at = at.Add(slotDuration)
+		at, err = si.StartSlotTime(slot)
 	}
+	slog.Error("Slot ticker stopped: start slot time failed", "slot", slot, "err", err)
 }

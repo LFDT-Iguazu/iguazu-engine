@@ -36,6 +36,9 @@ import (
 var (
 	errSynchronization  = errors.New("synchronization")
 	ErrInvalidBaseSpine = errors.New("invalid base spine")
+	// errCheckpointSpineNotFound is returned when a coordinated checkpoint refers
+	// to a spine block that is not in the local chain yet.
+	errCheckpointSpineNotFound = errors.New("checkpoint spine not found")
 )
 
 // blockChain is the blockchain interface required by dag.
@@ -215,8 +218,7 @@ func (d *Dag) HandleFinalize(data *types.FinalizationParams) *types.Finalization
 			e := err.Error()
 			res.Error = &e
 		} else {
-			d.bc.SetLastCoordinatedCheckpoint(data.Checkpoint)
-			if err := d.bc.HandleEra(data.Checkpoint); err != nil {
+			if err := d.applyCoordinatedCheckpoint(data.Checkpoint); err != nil {
 				strErr := err.Error()
 				res.Error = &strErr
 				slog.Error("Handle Finalize: update era failed 1", "syncMode", data.SyncMode, "result", res, "err", err)
@@ -224,8 +226,7 @@ func (d *Dag) HandleFinalize(data *types.FinalizationParams) *types.Finalization
 			}
 		}
 	} else {
-		d.bc.SetLastCoordinatedCheckpoint(data.Checkpoint)
-		if err := d.bc.HandleEra(data.Checkpoint); err != nil {
+		if err := d.applyCoordinatedCheckpoint(data.Checkpoint); err != nil {
 			strErr := err.Error()
 			res.Error = &strErr
 			slog.Error("Handle Finalize: update era failed 2", "syncMode", data.SyncMode, "result", res, "err", err)
@@ -261,6 +262,18 @@ func (d *Dag) HandleFinalize(data *types.FinalizationParams) *types.Finalization
 	)
 	slog.Info("TIME", "elapsed", time.Since(start).String(), "func", "Finalize")
 	return res
+}
+
+// applyCoordinatedCheckpoint stores the coordinated checkpoint and starts its era.
+// A checkpoint whose spine block is not in the local chain is rejected before it is
+// stored: such a checkpoint cannot be applied, and once persisted it breaks the
+// node on the next start. The caller retries after the spine is synced.
+func (d *Dag) applyCoordinatedCheckpoint(cp *types.Checkpoint) error {
+	if cp == nil || d.bc.GetHeaderByHash(cp.Spine) == nil {
+		return errCheckpointSpineNotFound
+	}
+	d.bc.SetLastCoordinatedCheckpoint(cp)
+	return d.bc.HandleEra(cp)
 }
 
 // HandleSyncSpines runs blocks finalization procedure for spine sync.

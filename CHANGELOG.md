@@ -10,6 +10,10 @@ Release notes for every version are published with its
 - Reimplemented the `validator/shuffle` (swap-or-not shuffle) and `dag/slotticker` packages. The validator permutation is unchanged. `SlotTicker.Done` may now be called more than once.
 - `slotticker.NewSlotTicker` now takes `*types.SlotInfo` and follows the slot duration fork. `Dag.HandleSyncSlotInfo` accepts the base and the forked slot duration from the coordinator and completes its settings with the local fork settings. With the fork disabled, timing is unchanged.
 
+### Fixed
+
+- `Dag.HandleFinalize` rejects a coordinated checkpoint whose spine block is not in the local chain instead of storing it. A stored checkpoint without its spine prevented the node from starting.
+
 ### Removed
 
 - Unused APIs: `slotticker.NewSlotTickerWithOffset`, `slotticker.Ticker`, `slotticker.Since`, `slotticker.Until`, `slotticker.Now`, `shuffle.CustomSHA256Hasher`.

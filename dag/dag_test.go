@@ -16,10 +16,12 @@
 package dag
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/LFDT-Iguazu/iguazu-types/blockdag/iface"
 	"github.com/LFDT-Iguazu/iguazu-types/blockdag/types"
+	"github.com/LFDT-Iguazu/iguazu-types/common"
 )
 
 const testGenesisTime = uint64(1_700_000_000)
@@ -108,6 +110,61 @@ func TestHandleSyncSlotInfo(t *testing.T) {
 				t.Fatalf("slot info must not be stored, got %+v", bc.stored)
 			case tt.wantStored != nil && (bc.stored == nil || *bc.stored != *tt.wantStored):
 				t.Fatalf("stored = %+v, want %+v", bc.stored, tt.wantStored)
+			}
+		})
+	}
+}
+
+// stubCpChain implements the part of the block chain used by applyCoordinatedCheckpoint.
+type stubCpChain struct {
+	blockChain
+	headers  map[common.Hash]*types.HeaderInfo
+	stored   *types.Checkpoint
+	eraCalls int
+}
+
+func (c *stubCpChain) GetHeaderByHash(h common.Hash) *types.HeaderInfo   { return c.headers[h] }
+func (c *stubCpChain) SetLastCoordinatedCheckpoint(cp *types.Checkpoint) { c.stored = cp }
+func (c *stubCpChain) HandleEra(*types.Checkpoint) error {
+	c.eraCalls++
+	return nil
+}
+
+// TestApplyCoordinatedCheckpoint checks that a checkpoint is stored only when its
+// spine block is known locally, so a node lagging behind the coordinator never
+// persists a checkpoint it cannot apply.
+func TestApplyCoordinatedCheckpoint(t *testing.T) {
+	known := common.Hash{0x01}
+	unknown := common.Hash{0x02}
+
+	tests := []struct {
+		name      string
+		cp        *types.Checkpoint
+		wantErr   error
+		wantStore bool
+	}{
+		{name: "known spine is stored", cp: &types.Checkpoint{Epoch: 10, FinEpoch: 12, Spine: known}, wantStore: true},
+		{name: "unknown spine is rejected", cp: &types.Checkpoint{Epoch: 10, FinEpoch: 12, Spine: unknown}, wantErr: errCheckpointSpineNotFound},
+		{name: "nil checkpoint is rejected", cp: nil, wantErr: errCheckpointSpineNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bc := &stubCpChain{headers: map[common.Hash]*types.HeaderInfo{known: {Hash: known}}}
+			d := &Dag{bc: bc}
+
+			err := d.applyCoordinatedCheckpoint(tt.cp)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if got := bc.stored != nil; got != tt.wantStore {
+				t.Fatalf("checkpoint stored = %v, want %v", got, tt.wantStore)
+			}
+			wantEra := 0
+			if tt.wantStore {
+				wantEra = 1
+			}
+			if bc.eraCalls != wantEra {
+				t.Fatalf("HandleEra calls = %d, want %d", bc.eraCalls, wantEra)
 			}
 		})
 	}

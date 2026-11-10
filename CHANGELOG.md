@@ -12,6 +12,7 @@ Release notes for every version are published with its
 
 ### Fixed
 
+- Forward finalization no longer stalls on a spine whose finalization chain includes blocks of a parallel branch with slots after the previous spine. The chain is checked to consist of the spine ancestors in the canonical order instead of comparing slots.
 - `Dag.HandleFinalize` in main sync mode skips fetching from peers when all blocks of the spines are already loaded. Peers may not serve such blocks, and every finalization step waited for them. If the check fails, the main sync runs as before.
 - `Dag.HandleFinalize` rejects a coordinated checkpoint whose spine block is not in the local chain instead of storing it. A stored checkpoint without its spine prevented the node from starting.
 

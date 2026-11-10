@@ -342,24 +342,43 @@ func (f *Finalizer) forwardFinalization(spines *common.HashArray, baseSpine *com
 		return spines, baseSpine, errInvalidBaseSpine
 	}
 
-	curSlot := baseHeader.Slot
 	curNr := baseHeader.Nr
 	curIndex := 0
+	var (
+		spineHeader *types.HeaderInfo
+		spineHash   common.Hash
+		// finalized blocks after the last confirmed spine
+		segment = make([]*types.HeaderInfo, 0)
+	)
 
 	for nr := curNr + 1; nr <= lfNr && curIndex < len(*spines); nr++ {
 		header := f.bc.GetHeaderByNumber(nr)
 		if header == nil {
 			return spines, baseSpine, fmt.Errorf("header not found by nr")
 		}
-		if header.Slot > curSlot {
-			curSlot = header.Slot
-			curSpine := (*spines)[curIndex]
-			if curSpine != header.Hash {
-				break
-			}
-			curIndex++
-			baseSpine = &curSpine
+		curSpine := (*spines)[curIndex]
+		if spineHash != curSpine {
+			spineHash = curSpine
+			spineHeader = f.bc.GetHeaderByHash(curSpine)
 		}
+		// The finalization chain of a spine is ordered by slot and ends with the spine.
+		// Its blocks may belong to parallel branches but never exceed the spine slot.
+		if spineHeader == nil || header.Slot > spineHeader.Slot {
+			break
+		}
+		if len(segment) > 0 && header.Slot < segment[len(segment)-1].Slot {
+			break
+		}
+		segment = append(segment, header)
+		if header.Hash != curSpine {
+			continue
+		}
+		if !isSpineDagChain(segment) {
+			break
+		}
+		curIndex++
+		baseSpine = &curSpine
+		segment = segment[:0]
 	}
 
 	resSpine := (*spines)[curIndex:]
@@ -370,6 +389,74 @@ func (f *Finalizer) forwardFinalization(spines *common.HashArray, baseSpine *com
 	)
 
 	return &resSpine, baseSpine, nil
+}
+
+// isSpineDagChain checks that a sequence of finalized blocks, ordered by slot and
+// ending with the spine, is the finalization chain of that spine: it consists of the
+// spine ancestors only and keeps the canonical order of blocks within a slot.
+func isSpineDagChain(chain []*types.HeaderInfo) bool {
+	if len(chain) == 0 {
+		return false
+	}
+	// blocks of the same slot must keep the canonical order
+	for i := 0; i < len(chain); {
+		j := i + 1
+		for j < len(chain) && chain[j].Slot == chain[i].Slot {
+			j++
+		}
+		if j-i > 1 {
+			for k, h := range sortSlotHeaders(chain[i:j]) {
+				if chain[i+k].Hash != h {
+					return false
+				}
+			}
+		}
+		i = j
+	}
+	// every block must be a spine ancestor reachable through the chain blocks only
+	chainMap := make(map[common.Hash]*types.HeaderInfo, len(chain))
+	for _, h := range chain {
+		chainMap[h.Hash] = h
+	}
+	spine := chain[len(chain)-1]
+	visited := map[common.Hash]struct{}{spine.Hash: {}}
+	queue := []*types.HeaderInfo{spine}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, ph := range cur.ParentHashes {
+			if _, ok := visited[ph]; ok {
+				continue
+			}
+			if parent, ok := chainMap[ph]; ok {
+				visited[ph] = struct{}{}
+				queue = append(queue, parent)
+			}
+		}
+	}
+	return len(visited) == len(chain)
+}
+
+// sortSlotHeaders returns the hashes of blocks of one slot in the canonical order:
+// height desc, number of parents desc, hash asc (as dagspine.SortBlocks orders blocks).
+func sortSlotHeaders(headers []*types.HeaderInfo) common.HashArray {
+	sorted := make([]*types.HeaderInfo, len(headers))
+	copy(sorted, headers)
+	sort.SliceStable(sorted, func(a, b int) bool {
+		ha, hb := sorted[a], sorted[b]
+		if ha.Height != hb.Height {
+			return ha.Height > hb.Height
+		}
+		if len(ha.ParentHashes) != len(hb.ParentHashes) {
+			return len(ha.ParentHashes) > len(hb.ParentHashes)
+		}
+		return ha.Hash.String() < hb.Hash.String()
+	})
+	hashes := make(common.HashArray, len(sorted))
+	for i, h := range sorted {
+		hashes[i] = h.Hash
+	}
+	return hashes
 }
 
 // errInvalidBaseSpine is returned when the base spine is not found or invalid.

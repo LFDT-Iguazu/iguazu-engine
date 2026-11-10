@@ -169,3 +169,41 @@ func TestApplyCoordinatedCheckpoint(t *testing.T) {
 		})
 	}
 }
+
+// stubUnloadedChain serves headers and the result of the ancestors lookup.
+type stubUnloadedChain struct {
+	blockChain
+	headers  map[common.Hash]*types.HeaderInfo
+	unloaded common.HashArray
+	err      error
+}
+
+func (c *stubUnloadedChain) GetHeaderByHash(h common.Hash) *types.HeaderInfo { return c.headers[h] }
+
+func (c *stubUnloadedChain) CollectAncestorsAftCpByParents(common.HashArray, common.Hash) (bool, iface.HeaderMap, common.HashArray, error) {
+	return false, nil, c.unloaded, c.err
+}
+
+func TestNeedMainSync(t *testing.T) {
+	spine := common.HexToHash("0x01")
+	loaded := map[common.Hash]*types.HeaderInfo{spine: {Hash: spine, Height: 5}}
+
+	tests := []struct {
+		name  string
+		chain *stubUnloadedChain
+		want  bool
+	}{
+		{"all blocks loaded", &stubUnloadedChain{headers: loaded}, false},
+		{"spine not loaded", &stubUnloadedChain{headers: map[common.Hash]*types.HeaderInfo{}}, true},
+		{"ancestors not loaded", &stubUnloadedChain{headers: loaded, unloaded: common.HashArray{common.HexToHash("0x02")}}, true},
+		{"check fails", &stubUnloadedChain{headers: loaded, err: errors.New("db error")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &Dag{bc: tt.chain}
+			if got := d.needMainSync(common.HashArray{spine}); got != tt.want {
+				t.Fatalf("needMainSync() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

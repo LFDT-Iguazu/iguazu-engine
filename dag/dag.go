@@ -184,6 +184,10 @@ func (d *Dag) HandleFinalize(data *types.FinalizationParams) *types.Finalization
 			slog.Info("Handle Finalize: valSync: main sync append", "i", i, "valSyncData", vs.Print())
 		}
 		d.bc.AppendNotProcessedValidatorSyncData(valSyncData)
+		if !d.needMainSync(spines) {
+			slog.Info("Handle Finalize: main sync skipped (all blocks loaded)", "baseSpine", baseSpine.Hex(), "spines", len(spines))
+			break
+		}
 		if err = d.downloader.MainSync(baseSpine, spines); err != nil {
 			strErr := err.Error()
 			res.Error = &strErr
@@ -364,6 +368,20 @@ func (d *Dag) handleSyncUnloadedBlocks(baseSpine common.Hash, spines common.Hash
 		return err
 	}
 	return nil
+}
+
+// needMainSync reports whether a main sync must fetch the spine blocks from peers.
+// Peers may not serve blocks the node already has, and each such request waits for
+// a timeout, so the sync is skipped when every block of the spines is loaded. The
+// check is an optimization only: if it fails, the main sync runs, otherwise the same
+// finalization request would fail again and again.
+func (d *Dag) needMainSync(spines common.HashArray) bool {
+	hasUnloaded, err := d.hasUnloadedBlocks(spines)
+	if err != nil {
+		slog.Warn("Handle Finalize: check unloaded blocks failed, run main sync", "err", err)
+		return true
+	}
+	return hasUnloaded
 }
 
 func (d *Dag) hasUnloadedBlocks(spines common.HashArray) (bool, error) {

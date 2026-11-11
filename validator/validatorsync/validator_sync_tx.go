@@ -174,6 +174,14 @@ func ValidateCreateTxValidatorSyncOp(bc blockchain, stateBlockHash common.Hash, 
 		if valSyncOp.Amount.Sign() == -1 {
 			return false, fmt.Errorf("validator sync operation failed: withdrawal amount is negative")
 		}
+		if bc.Config().IsForkSlotValSyncProc(slot) {
+			if valSyncOp.StakeAmount == nil {
+				return false, fmt.Errorf("validator sync operation failed: stake amount is required")
+			}
+			if valSyncOp.StakeAmount.Sign() == -1 || valSyncOp.StakeAmount.Cmp(valSyncOp.Amount) > 0 {
+				return false, fmt.Errorf("validator sync operation failed: bad stake amount")
+			}
+		}
 	default:
 		return false, fmt.Errorf("validator sync operation failed: unknown oparation type %d", valSyncOp.OpType)
 	}
@@ -197,6 +205,7 @@ func getValSyncTxData(valSyncOp types.ValidatorSync, withdrawal *common.Address,
 		valSyncOp.Balance,
 		valSyncOp.ActivationEpoch,
 		valSyncOp.ExitEpoch,
+		valSyncOp.StakeAmount,
 	); err != nil {
 		return nil, err
 	}

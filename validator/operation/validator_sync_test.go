@@ -40,6 +40,7 @@ func TestValidatorSync(t *testing.T) {
 		balance           *big.Int
 		activationEpoch   uint64
 		exitEpoch         uint64
+		stakeAmount       *big.Int
 	}
 
 	var (
@@ -53,6 +54,7 @@ func TestValidatorSync(t *testing.T) {
 		//ver2
 		activationEpoch uint64 = 789
 		exitEpoch       uint64 = math.MaxUint64
+		stakeAmount, _         = new(big.Int).SetString("1000000000000000000000", 10)
 	)
 
 	cases := []operationTestCase{
@@ -197,7 +199,7 @@ func TestValidatorSync(t *testing.T) {
 			encoded: hexToBytes("f4" +
 				"02" +
 				"f86302b860f85e80a00303030303030303030303030303030303030303030303030303030303030303" +
-				"81aa81bb94a7e558cc6efa1c41270ef4aa227b3dd6b4a3951e940000000000000000000000000000000000000000808082031588ffffffffffffffff"),
+				"81aa81bb94a7e558cc6efa1c41270ef4aa227b3dd6b4a3951e9400000000000000000000000000000000000000008082031588ffffffffffffffff80"),
 			errs: []error{},
 		},
 		{
@@ -215,7 +217,7 @@ func TestValidatorSync(t *testing.T) {
 			encoded: hexToBytes("f4" +
 				"04" +
 				"f86302b860f85e01a00303030303030303030303030303030303030303030303030303030303030303" +
-				"81aa81bb94a7e558cc6efa1c41270ef4aa227b3dd6b4a3951e940000000000000000000000000000000000000000808082031588ffffffffffffffff"),
+				"81aa81bb94a7e558cc6efa1c41270ef4aa227b3dd6b4a3951e9400000000000000000000000000000000000000008082031588ffffffffffffffff80"),
 			errs: []error{},
 		},
 		{
@@ -232,12 +234,13 @@ func TestValidatorSync(t *testing.T) {
 				balance:           balance,
 				activationEpoch:   activationEpoch,
 				exitEpoch:         exitEpoch,
+				stakeAmount:       stakeAmount,
 			},
 			encoded: hexToBytes("f4" +
 				"05" +
-				"f87702b874f87202a00303030303030303030303030303030303030303030303030303030303030303" +
+				"f87602b873f87102a00303030303030303030303030303030303030303030303030303030303030303" +
 				"81aa81bb94a7e558cc6efa1c41270ef4aa227b3dd6b4a3951e94ffffffffffffffffffffffffffffffffffffffff" +
-				"8a06c6b935b8bbd40000008a0d8d726b7177a800000082031588ffffffffffffffff"),
+				"8a06c6b935b8bbd400000082031588ffffffffffffffff893635c9adc5dea00000"),
 			errs: []error{},
 		},
 	}
@@ -256,6 +259,7 @@ func TestValidatorSync(t *testing.T) {
 			o.balance,
 			o.activationEpoch,
 			o.exitEpoch,
+			o.stakeAmount,
 		)
 		if err != nil {
 			return err
@@ -297,8 +301,15 @@ func TestValidatorSync(t *testing.T) {
 			if opDecoded.Amount().Cmp(o.amount) != 0 {
 				return fmt.Errorf("withdrawalAddress do not match:\nwant: %#x\nhave: %#x", o.amount.String(), opDecoded.Amount().String())
 			}
-			if opDecoded.Balance().Cmp(o.balance) != 0 {
+			if o.version < Ver2 && opDecoded.Balance().Cmp(o.balance) != 0 {
 				return fmt.Errorf("balance do not match:\nwant: %#x\nhave: %#x", o.amount.String(), opDecoded.Amount().String())
+			}
+			// op ver2 has no balance
+			if o.version >= Ver2 && opDecoded.Balance() != nil {
+				return fmt.Errorf("balance must be nil for op ver2: have %s", opDecoded.Balance().String())
+			}
+			if o.version >= Ver2 && o.stakeAmount != nil && opDecoded.StakeAmount().Cmp(o.stakeAmount) != 0 {
+				return fmt.Errorf("stakeAmount do not match:\nwant: %s\nhave: %s", o.stakeAmount.String(), opDecoded.StakeAmount().String())
 			}
 		}
 		return nil

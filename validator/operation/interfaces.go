@@ -45,6 +45,7 @@ type ValidatorSync interface {
 	Balance() *big.Int
 	ActivationEpoch() uint64
 	ExitEpoch() uint64
+	StakeAmount() *big.Int
 	Version() VersionValSyncOp
 	Print() string
 }

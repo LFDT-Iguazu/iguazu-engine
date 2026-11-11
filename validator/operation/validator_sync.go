@@ -47,9 +47,11 @@ type validatorSyncOperation struct {
 	balance           *big.Int
 	activationEpoch   uint64
 	exitEpoch         uint64
+	stakeAmount       *big.Int
 }
 
 // rlpValSyncOpVer2 rlp representation of ValidatorSyncOperation op ver 2.
+// Balance of ver 1 is replaced by StakeAmount.
 type rlpValSyncOpVer2 struct {
 	OpType            types.ValidatorSyncOp
 	InitTxHash        common.Hash
@@ -58,9 +60,9 @@ type rlpValSyncOpVer2 struct {
 	Creator           common.Address
 	WithdrawalAddress common.Address
 	Amount            big.Int
-	Balance           big.Int
 	ActivationEpoch   uint64
 	ExitEpoch         uint64
+	StakeAmount       big.Int
 }
 
 // rlpValSyncOpVer1 rlp representation of ValidatorSyncOperation op ver 1.
@@ -87,6 +89,7 @@ func (op *validatorSyncOperation) init(
 	balance *big.Int,
 	activationEpoch uint64,
 	exitEpoch uint64,
+	stakeAmount *big.Int,
 ) error {
 	if initTxHash == (common.Hash{}) {
 		return ErrNoInitTxHash
@@ -101,8 +104,11 @@ func (op *validatorSyncOperation) init(
 		if withdrawalAddress == nil {
 			return ErrNoWithdrawalAddress
 		}
-		if version > NoVer && balance == nil {
+		if version == Ver1 && balance == nil {
 			return ErrNoBalance
+		}
+		if version >= Ver2 && stakeAmount == nil {
+			return ErrNoStakeAmount
 		}
 	}
 	op.initTxHash = initTxHash
@@ -113,7 +119,11 @@ func (op *validatorSyncOperation) init(
 	op.amount = amount
 	if opType == types.UpdateBalance {
 		op.withdrawalAddress = withdrawalAddress
-		op.balance = balance
+		if version < Ver2 {
+			op.balance = balance
+		} else {
+			op.stakeAmount = stakeAmount
+		}
 	}
 	op.activationEpoch = activationEpoch
 	op.exitEpoch = exitEpoch
@@ -135,9 +145,10 @@ func NewValidatorSyncOperation(
 	balance *big.Int,
 	activationEpoch uint64,
 	exitEpoch uint64,
+	stakeAmount *big.Int,
 ) (ValidatorSync, error) {
 	op := validatorSyncOperation{}
-	if err := op.init(version, opType, initTxHash, procEpoch, index, creator, amount, withdrawalAddress, balance, activationEpoch, exitEpoch); err != nil {
+	if err := op.init(version, opType, initTxHash, procEpoch, index, creator, amount, withdrawalAddress, balance, activationEpoch, exitEpoch, stakeAmount); err != nil {
 		return nil, err
 	}
 	return &op, nil
@@ -156,7 +167,7 @@ func (op *validatorSyncOperation) UnmarshalBinary(b []byte) error {
 		if err != nil {
 			return err
 		}
-		return op.init(version, dec.OpType, dec.InitTxHash, dec.ProcEpoch, dec.Index, dec.Creator, &dec.Amount, &dec.WithdrawalAddress, &dec.Balance, 0, 0)
+		return op.init(version, dec.OpType, dec.InitTxHash, dec.ProcEpoch, dec.Index, dec.Creator, &dec.Amount, &dec.WithdrawalAddress, &dec.Balance, 0, 0, nil)
 	case Ver2:
 		dec := &rlpValSyncOpVer2{}
 		err = rlp.DecodeBytes(binData, dec)
@@ -166,8 +177,9 @@ func (op *validatorSyncOperation) UnmarshalBinary(b []byte) error {
 		return op.init(version,
 			dec.OpType, dec.InitTxHash, dec.ProcEpoch,
 			dec.Index, dec.Creator, &dec.Amount,
-			&dec.WithdrawalAddress, &dec.Balance,
+			&dec.WithdrawalAddress, nil,
 			dec.ActivationEpoch, dec.ExitEpoch,
+			&dec.StakeAmount,
 		)
 	default:
 		return ErrOpBadVersion
@@ -182,11 +194,17 @@ func (op *validatorSyncOperation) MarshalBinary() ([]byte, error) {
 		withdrawalAddress = &common.Address{}
 		amount            = new(big.Int)
 		balance           = new(big.Int)
+		stakeAmount       = new(big.Int)
 	)
 	if op.opType == types.UpdateBalance {
 		withdrawalAddress = op.withdrawalAddress
 		amount = op.amount
-		balance = op.balance
+		if op.balance != nil {
+			balance = op.balance
+		}
+		if op.stakeAmount != nil {
+			stakeAmount = op.stakeAmount
+		}
 	}
 	switch op.version {
 	case NoVer:
@@ -211,9 +229,9 @@ func (op *validatorSyncOperation) MarshalBinary() ([]byte, error) {
 			Creator:           op.creator,
 			WithdrawalAddress: *withdrawalAddress,
 			Amount:            *amount,
-			Balance:           *balance,
 			ActivationEpoch:   op.ActivationEpoch(),
 			ExitEpoch:         op.ExitEpoch(),
+			StakeAmount:       *stakeAmount,
 		})
 	default:
 		return nil, ErrOpBadVersion
@@ -260,7 +278,7 @@ func (op *validatorSyncOperation) unmarshalBinaryLegacy(b []byte) error {
 		startOffset = endOffset
 		amount = new(big.Int).SetBytes(b[startOffset:])
 	}
-	return op.init(NoVer, opType, initTxHash, procEpoch, index, creator, amount, &withdrawal, nil, 0, 0)
+	return op.init(NoVer, opType, initTxHash, procEpoch, index, creator, amount, &withdrawal, nil, 0, 0, nil)
 }
 
 // marshalBinaryLegacy marshals deprecated validator sync operation to byte encoding.
@@ -365,6 +383,14 @@ func (op *validatorSyncOperation) ExitEpoch() uint64 {
 	return op.exitEpoch
 }
 
+// StakeAmount returns the part of Amount withdrawn from the stake (the rest is rewards).
+func (op *validatorSyncOperation) StakeAmount() *big.Int {
+	if op.stakeAmount == nil {
+		return nil
+	}
+	return new(big.Int).Set(op.stakeAmount)
+}
+
 func (op *validatorSyncOperation) Version() VersionValSyncOp {
 	return op.version
 }
@@ -377,7 +403,7 @@ func (op *validatorSyncOperation) Print() string {
 		return "{nil}"
 	}
 	return fmt.Sprintf("{InitTxHash: %#x, OpType: %d, ProcEpoch: %d, Index: %d, Creator: %#x, Amount: %s, "+
-		"Balance: %s, WithdrawalAddress: %#x, ActivationEpoch: %d, exitEpoch: %d, ver: %d}",
+		"Balance: %s, WithdrawalAddress: %#x, ActivationEpoch: %d, exitEpoch: %d, StakeAmount: %s, ver: %d}",
 		op.initTxHash,
 		op.opType,
 		op.procEpoch,
@@ -388,6 +414,7 @@ func (op *validatorSyncOperation) Print() string {
 		op.withdrawalAddress.Hex(),
 		op.activationEpoch,
 		op.exitEpoch,
+		op.stakeAmount.String(),
 		op.version,
 	)
 }

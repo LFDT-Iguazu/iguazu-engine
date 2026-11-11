@@ -59,6 +59,8 @@ var (
 	ErrInvalidAmount          = errors.New("invalid amount")
 	ErrMismatchDelegateData   = errors.New("validator deposit failed (mismatch delegate stake data)")
 	ErrSenderRejByDelegate    = errors.New("sender addresses rejected by delegating stake rules")
+	ErrInvalidOpVersion       = errors.New("invalid validator sync operation version")
+	ErrInvalidStakeAmount     = errors.New("stake amount exceeds withdrawal amount")
 )
 
 const (
@@ -870,11 +872,25 @@ func (p *Processor) validatorDeactivate(op operation.ValidatorSync) ([]byte, err
 	return op.Creator().Bytes(), nil
 }
 
-// checkAndFixActivationStatus checks and fix activity status by op data while update balance operation.
+// checkAndFixActivationStatus checks and fix activity status while update balance operation
+// (fixes lost activate/deactivate operations).
+// The activation/exit epochs are taken from the coordinator data only,
+// as the tx creator is able to set any values to the tx.
+// Only two cases are fixed:
+//   - activation: coordinator: activated and not exited, gwat: not activated;
+//   - deactivation: coordinator: activated and exited, gwat: activated and not exited.
+//
+// The fix is applied only if the lost operation is expired (ValidatorOpExpireSlots).
 func (p *Processor) checkAndFixActivationStatus(op operation.ValidatorSync) error {
 	if op.Version() < operation.Ver2 {
 		return nil
 	}
+
+	saved := p.blockchain.GetValidatorSyncData(op.InitTxHash())
+	if saved == nil {
+		return ErrNoSavedValSyncOp
+	}
+	actEpoch, exitEpoch := saved.ActivationEpoch, saved.ExitEpoch
 
 	validator, err := p.Storage().GetValidator(p.state, op.Creator())
 	if err != nil {
@@ -888,10 +904,10 @@ func (p *Processor) checkAndFixActivationStatus(op operation.ValidatorSync) erro
 
 	//check and fix activation
 	if validator.GetActivationEra() == math.MaxUint64 &&
-		op.ActivationEpoch() < math.MaxUint64 &&
-		currEpoch > op.ActivationEpoch() &&
-		op.ActivationEpoch() > 0 {
-		activationSlot, err := p.blockchain.GetSlotInfo().SlotOfEpochStart(op.ActivationEpoch())
+		actEpoch > 0 && actEpoch < math.MaxUint64 &&
+		exitEpoch == math.MaxUint64 &&
+		currEpoch > actEpoch {
+		activationSlot, err := p.blockchain.GetSlotInfo().SlotOfEpochStart(actEpoch)
 		if err != nil {
 			return err
 		}
@@ -901,6 +917,8 @@ func (p *Processor) checkAndFixActivationStatus(op operation.ValidatorSync) erro
 		slog.Info("Validator fix activation: run",
 			"fixActivation", fixActivation,
 			"activationSlot", activationSlot,
+			"actEpoch", actEpoch,
+			"exitEpoch", exitEpoch,
 			"expireSlots", p.blockchain.Config().ValidatorOpExpireSlots,
 			"blSlot", p.ctx.Slot,
 			"blEra", p.ctx.Era,
@@ -955,10 +973,11 @@ func (p *Processor) checkAndFixActivationStatus(op operation.ValidatorSync) erro
 
 	//check and fix deactivation
 	if validator.GetExitEra() == math.MaxUint64 &&
-		op.ExitEpoch() < math.MaxUint64 && currEpoch > op.ExitEpoch() &&
 		validator.GetActivationEra() < p.ctx.Era &&
-		op.ExitEpoch() > 0 {
-		exitSlot, err := p.blockchain.GetSlotInfo().SlotOfEpochStart(op.ExitEpoch())
+		actEpoch < math.MaxUint64 &&
+		exitEpoch > 0 && exitEpoch < math.MaxUint64 &&
+		currEpoch > exitEpoch {
+		exitSlot, err := p.blockchain.GetSlotInfo().SlotOfEpochStart(exitEpoch)
 		if err != nil {
 			return err
 		}
@@ -968,6 +987,8 @@ func (p *Processor) checkAndFixActivationStatus(op operation.ValidatorSync) erro
 		slog.Info("Validator fix deactivation: run",
 			"fixDeactivation", fixDeactivation,
 			"exitSlot", exitSlot,
+			"actEpoch", actEpoch,
+			"exitEpoch", exitEpoch,
 			"expireSlots", p.blockchain.Config().ValidatorOpExpireSlots,
 			"blSlot", p.ctx.Slot,
 			"blEra", p.ctx.Era,
@@ -1229,20 +1250,33 @@ func (p *Processor) applyDelegatingStakeRules(op operation.ValidatorSync, valida
 		actualRules = &validator.DelegatingStake.TrialRules
 	}
 
-	opBalance := new(big.Int).Add(op.Balance(), op.Amount())
-
 	//Define withdrawals amounts of profit and stake
-	effectiveBalanceWei := new(big.Int).Mul(p.blockchain.Config().EffectiveBalance, common.BigWat)
-	profitBalance := new(big.Int).Sub(opBalance, effectiveBalanceWei)
-	if profitBalance.Sign() < 0 {
-		profitBalance = new(big.Int)
-	}
+	var profitOpAmt, stakeOpAmt *big.Int
+	if bc.Config().IsForkSlotValSyncProc(p.ctx.Slot) {
+		// the split is defined by coordinator (validated by CompareValSync)
+		stakeOpAmt = op.StakeAmount()
+		if stakeOpAmt == nil || stakeOpAmt.Sign() < 0 || stakeOpAmt.Cmp(op.Amount()) > 0 {
+			return nil, ErrInvalidStakeAmount
+		}
+		profitOpAmt = new(big.Int).Sub(op.Amount(), stakeOpAmt)
+	} else {
+		// op ver2 has no balance
+		if op.Balance() == nil {
+			return nil, operation.ErrNoBalance
+		}
+		opBalance := new(big.Int).Add(op.Balance(), op.Amount())
+		effectiveBalanceWei := new(big.Int).Mul(p.blockchain.Config().EffectiveBalance, common.BigWat)
+		profitBalance := new(big.Int).Sub(opBalance, effectiveBalanceWei)
+		if profitBalance.Sign() < 0 {
+			profitBalance = new(big.Int)
+		}
 
-	stakeOpAmt := new(big.Int)
-	profitOpAmt := new(big.Int).Sub(profitBalance, op.Amount())
-	if profitOpAmt.Sign() <= 0 {
-		profitOpAmt = new(big.Int).Set(profitBalance)
-		stakeOpAmt = new(big.Int).Sub(op.Amount(), profitOpAmt)
+		stakeOpAmt = new(big.Int)
+		profitOpAmt = new(big.Int).Sub(profitBalance, op.Amount())
+		if profitOpAmt.Sign() <= 0 {
+			profitOpAmt = new(big.Int).Set(profitBalance)
+			stakeOpAmt = new(big.Int).Sub(op.Amount(), profitOpAmt)
+		}
 	}
 
 	// calculate share
@@ -1356,7 +1390,11 @@ func ValidateValidatorSyncOp(bc blockchain, valSyncOp operation.ValidatorSync, a
 			return ErrInvalidOpEpoch
 		}
 	}
-	if !CompareValSync(savedValSync, valSyncOp, isForkDelegate) {
+	isForkValSyncProc := bc.Config().IsForkSlotValSyncProc(applySlot)
+	if isForkValSyncProc && valSyncOp.Version() < operation.Ver2 {
+		return ErrInvalidOpVersion
+	}
+	if !CompareValSync(savedValSync, valSyncOp, isForkDelegate, isForkValSyncProc) {
 		return ErrMismatchValSyncOp
 	}
 	if savedValSync.TxHash != nil && *savedValSync.TxHash != txHash {
@@ -1414,6 +1452,9 @@ func ValidateValidatorSyncOp(bc blockchain, valSyncOp operation.ValidatorSync, a
 		if valSyncOp.Version() == operation.Ver1 && valSyncOp.Balance() == nil {
 			return operation.ErrNoBalance
 		}
+		if valSyncOp.Version() >= operation.Ver2 && valSyncOp.StakeAmount() == nil {
+			return operation.ErrNoStakeAmount
+		}
 	default:
 		return ErrInvalidOpCode
 	}
@@ -1431,7 +1472,7 @@ func ValidateValidatorSyncOp(bc blockchain, valSyncOp operation.ValidatorSync, a
 }
 
 // CompareValSync compares a stored ValidatorSync record with an incoming operation.
-func CompareValSync(saved *types.ValidatorSync, input operation.ValidatorSync, isForkDelegate bool) bool {
+func CompareValSync(saved *types.ValidatorSync, input operation.ValidatorSync, isForkDelegate, isForkValSyncProc bool) bool {
 	if saved.InitTxHash != input.InitTxHash() {
 		slog.Warn("check validator sync failed: InitTxHash", "s.InitTxHash", saved.InitTxHash.Hex(), "i.InitTxHash", input.InitTxHash().Hex())
 		return false
@@ -1469,6 +1510,14 @@ func CompareValSync(saved *types.ValidatorSync, input operation.ValidatorSync, i
 	if saved.Amount != nil && input.Amount() == nil || saved.Amount == nil && input.Amount() != nil {
 		slog.Warn("check validator sync failed: Amount nil", "s.Amount", saved.Amount, "i.Amount", input.Amount())
 		return false
+	}
+
+	// the stake amount defines the split of withdrawal between stake and rewards
+	if isForkValSyncProc && input.OpType() == types.UpdateBalance {
+		if saved.StakeAmount == nil || input.StakeAmount() == nil || saved.StakeAmount.Cmp(input.StakeAmount()) != 0 {
+			slog.Warn("check validator sync failed: StakeAmount", "s.StakeAmount", saved.StakeAmount, "i.StakeAmount", input.StakeAmount())
+			return false
+		}
 	}
 
 	return true

@@ -3,7 +3,7 @@ module github.com/LFDT-Iguazu/iguazu-engine
 go 1.21
 
 require (
-	github.com/LFDT-Iguazu/iguazu-types v0.2.0
+	github.com/LFDT-Iguazu/iguazu-types v0.3.0
 	github.com/holiman/uint256 v1.2.4
 	github.com/minio/sha256-simd v1.0.0
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7

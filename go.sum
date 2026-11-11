@@ -1,5 +1,5 @@
-github.com/LFDT-Iguazu/iguazu-types v0.2.0 h1:LOaFlErypKMVqZeS0/TImZ2crCA6RbSOtlguDkdnpOo=
-github.com/LFDT-Iguazu/iguazu-types v0.2.0/go.mod h1:XwBRjyqT0VfjR1CvoXcr/YsM/1LRcYagaEat+CM4Cus=
+github.com/LFDT-Iguazu/iguazu-types v0.3.0 h1:5mxeNQlc3w/uIkl0txEwhiJv7XO2wXoqEEa9FA1ahq8=
+github.com/LFDT-Iguazu/iguazu-types v0.3.0/go.mod h1:XwBRjyqT0VfjR1CvoXcr/YsM/1LRcYagaEat+CM4Cus=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/holiman/uint256 v1.2.4 h1:jUc4Nk8fm9jZabQuqr2JzednajVmBpC+oiTiXZJEApU=

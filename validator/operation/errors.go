@@ -29,6 +29,7 @@ var (
 	ErrNoSignature         = errors.New("signature is required")
 	ErrNoAmount            = errors.New("amount is required")
 	ErrNoBalance           = errors.New("balance is required")
+	ErrNoStakeAmount       = errors.New("stake amount is required")
 	ErrNoRules             = errors.New("rules is required")
 	ErrRawDataShort        = errors.New("binary data for validator operation is short")
 

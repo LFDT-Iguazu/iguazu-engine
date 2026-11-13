@@ -271,12 +271,12 @@ func newStorage(t *testing.T, descriptors []FieldDescriptor) Storage {
 
 func compareScalar(exp, got interface{}) bool {
 	expV := reflect.ValueOf(exp)
-	if expV.Kind() == reflect.Ptr {
+	if expV.Kind() == reflect.Pointer {
 		expV = expV.Elem()
 	}
 
 	gotV := reflect.ValueOf(got)
-	if gotV.Kind() == reflect.Ptr {
+	if gotV.Kind() == reflect.Pointer {
 		gotV = gotV.Elem()
 	}
 
@@ -285,12 +285,12 @@ func compareScalar(exp, got interface{}) bool {
 
 func compareArray(expArr, arrPtr interface{}) bool {
 	exp := reflect.ValueOf(expArr)
-	if exp.Kind() == reflect.Ptr {
+	if exp.Kind() == reflect.Pointer {
 		exp = exp.Elem()
 	}
 
 	got := reflect.ValueOf(arrPtr)
-	if got.Kind() == reflect.Ptr {
+	if got.Kind() == reflect.Pointer {
 		got = got.Elem()
 	}
 

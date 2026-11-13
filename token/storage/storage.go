@@ -385,7 +385,7 @@ func encodeScalar(v interface{}) ([]byte, error) {
 // supports: uint8, uint16, unit32, uint64, uint256, int32, int64
 func decodeScalar(buf []byte, vPtr interface{}) error {
 	tp := reflect.TypeOf(vPtr)
-	if tp.Kind() != reflect.Ptr {
+	if tp.Kind() != reflect.Pointer {
 		return newBadTypeErr(vPtr)
 	}
 
@@ -422,7 +422,7 @@ func decodeScalar(buf []byte, vPtr interface{}) error {
 // supports scalar types
 func encodeArray(arr interface{}) ([]byte, error) {
 	tp := reflect.TypeOf(arr)
-	if !(tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array) {
+	if tp.Kind() != reflect.Slice && tp.Kind() != reflect.Array {
 		return nil, ErrArrayExpected
 	}
 
@@ -451,7 +451,7 @@ func encodeArray(arr interface{}) ([]byte, error) {
 // supports scalar types
 func decodeArray(buf []byte, arrPtr interface{}) error {
 	tp := reflect.TypeOf(arrPtr)
-	if tp.Kind() != reflect.Ptr {
+	if tp.Kind() != reflect.Pointer {
 		return newBadTypeErr(arrPtr)
 	}
 
@@ -464,14 +464,14 @@ func decodeArray(buf []byte, arrPtr interface{}) error {
 		return nil
 	default:
 		tp := reflect.TypeOf(value.Interface())
-		if !(tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array) {
+		if tp.Kind() != reflect.Slice && tp.Kind() != reflect.Array {
 			return ErrArrayExpected
 		}
 
 		elemType := tp.Elem()
 		elemSize := elemType.Size()
 
-		if elemType.Kind() == reflect.Ptr {
+		if elemType.Kind() == reflect.Pointer {
 			elemSize = elemType.Elem().Size()
 		}
 
@@ -482,7 +482,7 @@ func decodeArray(buf []byte, arrPtr interface{}) error {
 		var err error
 		var newElem reflect.Value
 		for len(buf) > 0 {
-			if elemType.Kind() == reflect.Ptr {
+			if elemType.Kind() == reflect.Pointer {
 				newElem = reflect.New(elemType.Elem())
 			} else {
 				newElem = reflect.New(elemType)
@@ -493,7 +493,7 @@ func decodeArray(buf []byte, arrPtr interface{}) error {
 				return err
 			}
 
-			if elemType.Kind() == reflect.Ptr {
+			if elemType.Kind() == reflect.Pointer {
 				value.Set(reflect.Append(value, newElem))
 			} else {
 				value.Set(reflect.Append(value, newElem.Elem()))

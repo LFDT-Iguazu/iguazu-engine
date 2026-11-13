@@ -23,6 +23,11 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      # Helpers used only by the tests of the same package (excluded in v1
+      # with skip-files).
+      - token/operation/test_utils.go
+      - validator/operation/test_utils.go
+      - validator/txlog/test_utils.go
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
